@@ -1,0 +1,81 @@
+Project Statement:
+To develop a machine learning classification model that predicts the type of forest cover in a given geographical area based on cartographic variables like elevation, soil type, slope, and wilderness area information. The goal is to assist in environmental monitoring, forestry management, and land use planning by providing automated, reliable forest cover type identification.
+
+Project Workflow:
+1. Data Preprocessing
+
+Checked dataset structure using .info(), .describe(), .shape().
+
+Verified no missing values and removed duplicate entries.
+
+Detected and handled outliers using Z-score / IQR methods.
+
+Fixed skewness in continuous variables (e.g., elevation, distances) using np.log1p() transformation.
+
+Created derived features:
+
+Elevation_to_Hydrology_Ratio
+
+Total_Hillshade = Hillshade_9am + Hillshade_Noon + Hillshade_3pm
+
+2. Feature Selection & Scaling
+
+Reduced features from 55 → 15 using SelectKBest / SCSquare method to improve accuracy.
+
+Applied Min-Max Scaling to normalize continuous variables.
+
+3. Handling Data Imbalance
+
+The dataset had a severe imbalance (e.g., Lodgepole Pine dominating with 103,071 records).
+
+Applied SMOTE (Synthetic Minority Oversampling Technique) to balance the classes and prevent bias.
+
+4. Model Building
+
+Trained multiple classification models:
+
+Random Forest Classifier
+
+XGBoost Classifier
+
+Decision Tree Classifier
+
+Logistic Regression
+
+Used GridSearchCV for hyperparameter tuning and cross-validation to find the best parameters.
+
+Best Model:
+RandomForestClassifier gave the highest accuracy and stability across test data.
+
+5. Model Evaluation
+
+Key metrics:
+
+Accuracy
+
+Precision, Recall, F1-score
+
+Final test accuracy: ~90–92% (depending on random state)
+Random Forest proved most robust and interpretable.
+
+6. Model Deployment with Streamlit
+
+Developed an interactive Streamlit web application that allows users to:
+
+Enter or select environmental feature values.
+
+Choose from preset scenarios (for each forest type) to auto-fill inputs.
+
+View the predicted forest cover type.
+
+See probability distribution for all classes (visualized as a bar chart).
+
+Both the trained model (best_forest_model.pkl) and label encoder (label_encoder.pkl) are loaded dynamically for real-time predictions.
+
+*Future Enhancements*
+
+Integrate map visualization for geospatial insights.
+
+Allow batch predictions via CSV uploads.
+
+Deploy using Streamlit Cloud or Render for public access.
