@@ -1,0 +1,2 @@
+# EcoType-Forest-Cover-Type-Prediction-Using-Machine-Learning
+The goal of this project is to forecast the kind of forest cover using environmental and topographical characteristics including aspect, elevation, soil type, and hillshade. The project encompasses all phases, including feature engineering, data cleaning, model training, optimization, and deployment via an interactive Streamlit online application.
