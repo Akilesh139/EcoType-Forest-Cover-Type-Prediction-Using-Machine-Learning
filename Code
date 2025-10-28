@@ -1,0 +1,255 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import joblib
+
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler
+from sklearn.feature_selection import SelectKBest, f_classif
+from sklearn.model_selection import RandomizedSearchCV
+from sklearn.metrics import classification_report, f1_score, confusion_matrix
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.linear_model import LogisticRegression
+from xgboost import XGBClassifier
+from imblearn.over_sampling import SMOTE
+pd.set_option('display.max_columns', None)
+RANDOM_STATE = 42
+
+# Load Data
+df = pd.read_csv("cover_type (1).csv")
+print("Data Loaded Successfully!\n")
+print(df.shape)
+df.head()
+df.info()
+
+print("\n Checking Missing Values:")
+print(df.isnull().sum().sum(), "missing values in total")
+
+print("\n Checking Duplicates:")
+print(df.duplicated().sum(), "duplicate rows found")
+
+# Drop duplicates if any
+df = df.drop_duplicates()
+print("Duplicates removed. New shape:", df.shape)
+
+# EDA
+# Class distribution
+plt.figure(figsize=(8,4))
+sns.countplot(data=df, x='Cover_Type', order=df['Cover_Type'].value_counts().index)
+plt.title("Class Distribution of Cover_Type")
+plt.xticks(rotation=45)
+plt.show()
+
+# Numeric summary
+df.describe()
+
+# Adding new columns to improve accuracy
+# Example: Create slope ratio or elevation difference features
+df['Elevation_to_Hydrology_Ratio'] = df['Elevation'] / (df['Vertical_Distance_To_Hydrology'] + 1)
+df['Total_Hillshade'] = df['Hillshade_9am'] + df['Hillshade_Noon'] + df['Hillshade_3pm']
+
+print("Derived new features added.\n")
+print(df[['Elevation_to_Hydrology_Ratio', 'Total_Hillshade']].head())
+
+# Outliers Handling IOR
+numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
+print("Numeric columns:", numeric_cols)
+
+for col in numeric_cols:
+    Q1 = df[col].quantile(0.25)
+    Q3 = df[col].quantile(0.75)
+    IQR = Q3 - Q1
+    lower, upper = Q1 - 1.5 * IQR, Q3 + 1.5 * IQR
+    df[col] = np.clip(df[col], lower, upper)
+
+print("Outliers handled using IQR method.")
+
+# Saving cleaned dataset before Scaling
+cleaned_df = df.copy()
+cleaned_df.to_csv("cleaned_forest_data.csv", index=False)
+print("Cleaned dataset saved as 'cleaned_forest_data.csv'")
+
+#Label Encode Target column
+le = LabelEncoder()
+df['Cover_Type'] = le.fit_transform(df['Cover_Type'])
+joblib.dump(le, "label_encoder.pkl")
+print("Target encoded and saved as label_encoder.pkl")
+
+# Sacling (Min/Max)
+scaler = MinMaxScaler()
+X = df.drop('Cover_Type', axis=1)
+y = df['Cover_Type']
+
+X_scaled = scaler.fit_transform(X)
+joblib.dump(scaler, "scaler.pkl")
+
+#Feature selection
+selector = SelectKBest(score_func=f_classif, k=15)
+X_selected = selector.fit_transform(X_scaled, y)
+selected_features = X.columns[selector.get_support()]
+print("\nSelected Features (Top 15):")
+print(selected_features)
+
+# Train test split
+X_train, X_test, y_train, y_test = train_test_split(
+    X_selected, y, test_size=0.2, random_state=RANDOM_STATE, stratify=y
+)
+print("\nData Split Done")
+print("Train shape:", X_train.shape, "Test shape:", X_test.shape)
+
+# Handle data imbalance
+sm = SMOTE(random_state=RANDOM_STATE)
+X_train, y_train = sm.fit_resample(X_train, y_train)
+print("\nSMOTE applied.")
+print(pd.Series(y_train).value_counts())
+
+# Train model
+models = {
+    "RandomForest": RandomForestClassifier(random_state=RANDOM_STATE),
+    "DecisionTree": DecisionTreeClassifier(random_state=RANDOM_STATE),
+    "LogisticRegression": LogisticRegression(max_iter=1000, random_state=RANDOM_STATE),
+    "XGBoost": XGBClassifier(eval_metric='mlogloss', random_state=RANDOM_STATE)
+}
+
+results = {}
+for name, model in models.items():
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    f1 = f1_score(y_test, y_pred, average='macro')
+    results[name] = f1
+    print(f"\n {name} F1 Score: {f1:.4f}")
+    print(classification_report(y_test, y_pred))
+
+print("\n Model Comparison (F1 Scores):")
+print(results)
+
+# Hyperparameter tuning
+param_dist = {
+    'n_estimators': [100, 150, 200],
+    'max_depth': [10, 20, None],
+    'min_samples_split': [2, 5, 10]
+}
+
+random_search = RandomizedSearchCV(
+    RandomForestClassifier(random_state=RANDOM_STATE, n_jobs=-1),
+    param_distributions=param_dist,
+    n_iter=5,   # try 5 random combinations
+    cv=2,  
+    scoring='f1_macro',
+    verbose=1,
+    random_state=RANDOM_STATE
+)
+
+random_search.fit(X_train, y_train)
+
+best_model = random_search.best_estimator_
+print("\nBest Params:", random_search.best_params_)
+
+# Evaluate
+y_pred_best = best_model.predict(X_test)
+print("\nFinal Model Performance:")
+print(classification_report(y_test, y_pred_best))
+print("Macro F1 Score:", f1_score(y_test, y_pred_best, average='macro'))
+
+joblib.dump(best_model, "best_forest_model.pkl")
+print("Best model saved as best_forest_model.pkl")
+
+import streamlit as st
+import numpy as np
+import joblib
+
+# Load model and encoder
+model = joblib.load("best_forest_model.pkl")
+label_encoder = joblib.load("label_encoder.pkl")
+
+st.title("🌲 Forest Cover Type Prediction (Random Forest Model)")
+st.write("This app predicts the forest cover type based on terrain and soil data. You can manually enter values or use preset scenarios for testing.")
+
+# --- PRESET SCENARIOS ---
+preset_scenarios = {
+    "Lodgepole Pine": {
+        "Elevation": 2950, "Aspect": 120, "Slope": 10, "HDH": 250, "VDH": 50, "HDR": 2500,
+        "Hill9": 210, "HillNoon": 230, "Hill3": 160, "HDF": 3000, "Soil": "Soil_Type_39"
+    },
+    "Spruce/Fir": {
+        "Elevation": 3400, "Aspect": 180, "Slope": 20, "HDH": 400, "VDH": 80, "HDR": 3500,
+        "Hill9": 190, "HillNoon": 220, "Hill3": 130, "HDF": 4000, "Soil": "Soil_Type_29"
+    },
+    "Aspen": {
+        "Elevation": 2650, "Aspect": 90, "Slope": 6, "HDH": 200, "VDH": 30, "HDR": 400,
+        "Hill9": 220, "HillNoon": 240, "Hill3": 150, "HDF": 1000, "Soil": "Soil_Type_40"
+    },
+    "Krummholz": {
+        "Elevation": 3750, "Aspect": 250, "Slope": 30, "HDH": 600, "VDH": 120, "HDR": 5000,
+        "Hill9": 170, "HillNoon": 200, "Hill3": 100, "HDF": 5000, "Soil": "Soil_Type_29"
+    },
+    "Ponderosa Pine": {
+        "Elevation": 2200, "Aspect": 120, "Slope": 8, "HDH": 150, "VDH": 40, "HDR": 800,
+        "Hill9": 230, "HillNoon": 250, "Hill3": 170, "HDF": 500, "Soil": "Soil_Type_40"
+    },
+    "Douglas-fir": {
+        "Elevation": 2450, "Aspect": 150, "Slope": 12, "HDH": 250, "VDH": 50, "HDR": 1500,
+        "Hill9": 220, "HillNoon": 240, "Hill3": 160, "HDF": 1200, "Soil": "Soil_Type_39"
+    },
+    "Cottonwood/Willow": {
+        "Elevation": 2000, "Aspect": 45, "Slope": 3, "HDH": 80, "VDH": 0, "HDR": 400,
+        "Hill9": 210, "HillNoon": 230, "Hill3": 170, "HDF": 300, "Soil": "Soil_Type_40"
+    }
+}
+
+# --- Select preset ---
+st.sidebar.header("🧭 Input Parameters")
+preset_choice = st.sidebar.selectbox("Choose Preset Scenario", list(preset_scenarios.keys()) + ["Manual Input"])
+
+if preset_choice != "Manual Input":
+    preset = preset_scenarios[preset_choice]
+    st.sidebar.info(f"Preset values loaded for **{preset_choice}**.")
+else:
+    preset = {key: None for key in preset_scenarios["Aspen"]}
+
+# --- Sidebar inputs ---
+elevation = st.sidebar.number_input("Elevation", 0, 5000, value=preset["Elevation"] or 2500)
+aspect = st.sidebar.number_input("Aspect", 0, 360, value=preset["Aspect"] or 180)
+slope = st.sidebar.number_input("Slope", 0, 90, value=preset["Slope"] or 10)
+horiz_dist_hydro = st.sidebar.number_input("Horizontal Distance to Hydrology", 0, 2000, value=preset["HDH"] or 100)
+vert_dist_hydro = st.sidebar.number_input("Vertical Distance to Hydrology", -500, 500, value=preset["VDH"] or 30)
+horiz_dist_road = st.sidebar.number_input("Horizontal Distance to Roadways", 0, 10000, value=preset["HDR"] or 1000)
+hillshade_9am = st.sidebar.number_input("Hillshade 9am", 0, 255, value=preset["Hill9"] or 150)
+hillshade_noon = st.sidebar.number_input("Hillshade Noon", 0, 255, value=preset["HillNoon"] or 200)
+hillshade_3pm = st.sidebar.number_input("Hillshade 3pm", 0, 255, value=preset["Hill3"] or 180)
+horiz_dist_fire = st.sidebar.number_input("Horizontal Distance to Fire Points", 0, 10000, value=preset["HDF"] or 500)
+
+soil_types = ['Soil_Type_29', 'Soil_Type_39', 'Soil_Type_40']
+selected_soil = st.sidebar.selectbox("Soil Type", soil_types, index=soil_types.index(preset["Soil"]) if preset["Soil"] else 0)
+
+# --- Soil one-hot encoding ---
+soil_29 = 1 if selected_soil == 'Soil_Type_29' else 0
+soil_39 = 1 if selected_soil == 'Soil_Type_39' else 0
+soil_40 = 1 if selected_soil == 'Soil_Type_40' else 0
+
+# --- Derived features ---
+elevation_to_hydro_ratio = elevation / (horiz_dist_hydro + 1)
+total_hillshade = hillshade_9am + hillshade_noon + hillshade_3pm
+
+# --- Input array ---
+input_features = np.array([[
+    elevation, aspect, slope, horiz_dist_hydro, vert_dist_hydro,
+    horiz_dist_road, hillshade_9am, hillshade_noon, hillshade_3pm,
+    horiz_dist_fire, soil_29, soil_39, soil_40,
+    elevation_to_hydro_ratio, total_hillshade
+]])
+
+# --- Predict ---
+if st.button("🌳 Predict Cover Type"):
+    prediction = model.predict(input_features)
+    predicted_class = label_encoder.inverse_transform(prediction)[0]
+    st.success(f"Predicted Forest Cover Type: **{predicted_class}**")
+
+    # Display probability distribution
+    proba = model.predict_proba(input_features)[0]
+    class_names = label_encoder.classes_
+
+    st.subheader("📊 Prediction Probabilities")
+    st.bar_chart({class_names[i]: proba[i] for i in range(len(class_names))})
